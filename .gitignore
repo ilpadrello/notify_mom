@@ -1,0 +1,23 @@
+node_modules/
+build/
+dist/
+.env
+.env.local
+.DS_Store
+*.log
+logs/
+*.db
+data/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.env.*.local
+coverage/
+.nyc_output/
+.npm-debug.log*
+yarn-error.log*
+package-lock.json
+pnpm-lock.yaml# OAuth2 token (IMPORTANT: Don't commit this!)
+token.json

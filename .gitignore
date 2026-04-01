@@ -1,8 +1,10 @@
 node_modules/
 build/
 dist/
-.env
-.env.local
+*.env
+*.env.local
+*.env.*.local
+!.env.example
 .DS_Store
 *.log
 logs/
@@ -13,7 +15,6 @@ data/
 *.swp
 *.swo
 *~
-.env.*.local
 coverage/
 .nyc_output/
 .npm-debug.log*

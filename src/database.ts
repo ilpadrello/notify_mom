@@ -13,6 +13,8 @@ export interface ScheduleEntry {
   day: string;
   time: string;
   name: string;
+  event_timestamp: string | null;
+  first_notification_sent: number;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +74,8 @@ class DatabaseManager {
         day TEXT NOT NULL,
         time TEXT NOT NULL,
         name TEXT NOT NULL,
+        event_timestamp TEXT,
+        first_notification_sent INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (sheet_name, mese, day, time)
@@ -92,6 +96,22 @@ class DatabaseManager {
     try {
       await this.db.exec(createScheduleTableSQL);
       await this.db.exec(createSyncLogTableSQL);
+
+      // Try to add new columns if they don't exist (for existing databases)
+      try {
+        await this.db.exec(
+          `ALTER TABLE schedule_entries ADD COLUMN event_timestamp TEXT DEFAULT NULL;`,
+        );
+        await this.db.exec(
+          `ALTER TABLE schedule_entries ADD COLUMN first_notification_sent INTEGER DEFAULT 0;`,
+        );
+      } catch (alterError) {
+        // Columns might already exist, this is okay
+        logger.debug(
+          "New columns already exist or error adding them (expected for existing databases)",
+        );
+      }
+
       logger.debug("Database tables created or already exist");
     } catch (error) {
       logger.error("Failed to create tables:", error);
@@ -147,6 +167,114 @@ class DatabaseManager {
   }
 
   /**
+   * Get entries for today by event_timestamp
+   */
+  async getEntriesForToday(): Promise<ScheduleEntry[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, "0");
+      const day = String(today.getDate()).padStart(2, "0");
+      const todayDateString = `${year}-${month}-${day}`;
+
+      // Use SQLite's date() function to extract date from timestamp and compare
+      // This handles timezone-aware timestamps correctly
+      const entries = await this.db.all(
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND date(event_timestamp) = ?",
+        [todayDateString],
+      );
+      return entries as ScheduleEntry[];
+    } catch (error) {
+      logger.error("Failed to get entries for today:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get entries that start within the next 3 hours and haven't sent first notification
+   */
+  async getEntriesWithinNextHours(hours: number): Promise<ScheduleEntry[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const now = new Date();
+      const futureTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
+
+      const entries = await this.db.all(
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND event_timestamp > ? AND event_timestamp <= ? AND first_notification_sent = 0",
+        [now.toISOString(), futureTime.toISOString()],
+      );
+      return entries as ScheduleEntry[];
+    } catch (error) {
+      logger.error("Failed to get upcoming entries:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark entry's first notification as sent
+   */
+  async markFirstNotificationSent(
+    sheet_name: string,
+    mese: string,
+    day: string,
+    time: string,
+  ): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const now = new Date().toISOString();
+      await this.db.run(
+        "UPDATE schedule_entries SET first_notification_sent = 1, updated_at = ? WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
+        [now, sheet_name, mese, day, time],
+      );
+      logger.debug(
+        `Marked first notification sent for ${sheet_name}/${mese}/${day}/${time}`,
+      );
+    } catch (error) {
+      logger.error(
+        `Failed to mark first notification sent for ${sheet_name}/${mese}/${day}/${time}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get entries by day and month (for daily reminders)
+   */
+  async getEntriesByDayAndMonth(
+    day: string,
+    month: string,
+  ): Promise<ScheduleEntry[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const entries = await this.db.all(
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE day = ? AND mese = ?",
+        [day, month],
+      );
+      return entries as ScheduleEntry[];
+    } catch (error) {
+      logger.error(
+        `Failed to get entries for day ${day} and month ${month}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Insert new entry
    */
   async insertEntry(entry: ScheduleEntry): Promise<void> {
@@ -157,14 +285,16 @@ class DatabaseManager {
     try {
       const now = new Date().toISOString();
       await this.db.run(
-        `INSERT INTO schedule_entries (sheet_name, mese, day, time, name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO schedule_entries (sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.sheet_name,
           entry.mese,
           entry.day,
           entry.time,
           entry.name,
+          entry.event_timestamp || null,
+          entry.first_notification_sent || 0,
           now,
           now,
         ],

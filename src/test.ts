@@ -3,6 +3,7 @@
  * Tests core functionality before running the application
  */
 
+import "dotenv/config";
 import logger from "./logger.js";
 import db from "./database.js";
 import sync from "./sync.js";
@@ -19,18 +20,23 @@ interface TestResult {
 const results: TestResult[] = [];
 
 /**
- * Test 1: Logger Functionality
+ * Test 1: Logger Functionality (all levels including file output)
  */
 async function testLogger(): Promise<void> {
   try {
-    logger.info("🧪 Test 1: Logger functionality");
+    logger.info("🧪 Test 1: Logger functionality - testing all log levels");
     logger.debug("Debug log test");
     logger.warn("Warning log test");
+    logger.error("Error log test (intentional)");
+
+    // Give pino time to flush logs to file
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     results.push({
       name: "Logger",
       status: "✅ PASS",
-      message: "Logger initialized and working correctly",
+      message:
+        "Logger initialized and working correctly (logs written to console and logs/app.log)",
       required: true,
     });
   } catch (error) {
@@ -301,6 +307,48 @@ function printResults(): void {
 }
 
 /**
+ * Test 6: Log File Verification
+ * Verifies that logs are actually written to disk
+ */
+async function testLogFileOutput(): Promise<void> {
+  try {
+    const fs = await import("fs");
+    const path = await import("path");
+
+    // Give pino time to flush
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const logPath = path.join(process.cwd(), "logs", "app.log");
+
+    if (!fs.existsSync(logPath)) {
+      throw new Error(`Log file not found at ${logPath}`);
+    }
+
+    const logContent = fs.readFileSync(logPath, "utf-8");
+    const logLines = logContent.split("\n").filter((line) => line.trim());
+
+    if (logLines.length === 0) {
+      throw new Error("Log file is empty - logs not being written to disk");
+    }
+
+    results.push({
+      name: "Log File Output",
+      status: "✅ PASS",
+      message: `Logs successfully written to logs/app.log (${logLines.length} lines)`,
+      required: true,
+    });
+  } catch (error) {
+    results.push({
+      name: "Log File Output",
+      status: "❌ FAIL",
+      message: `Log file verification failed: ${error}`,
+      required: true,
+    });
+    throw error;
+  }
+}
+
+/**
  * Run all tests
  */
 async function runTests(): Promise<void> {
@@ -311,16 +359,24 @@ async function runTests(): Promise<void> {
     await testLogger();
     await testDatabase();
     await testGoogleSheets();
+    await testLogFileOutput();
 
     // Optional tests
     await testEmailNotification();
     await testTelegramNotification();
+
+    // IMPORTANT: Give pino time to flush logs to disk before exit
+    // pino uses async file writes, so we need a delay
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Print results and exit
     printResults();
   } catch (error) {
     logger.error("❌ Test suite failed:", error);
     console.error("\n❌ Critical error during testing:", error);
+
+    // Still wait for logs to flush on error
+    await new Promise((resolve) => setTimeout(resolve, 500));
     process.exit(1);
   }
 }

@@ -2,8 +2,29 @@ import { GoogleSpreadsheet } from "google-spreadsheet";
 import oauth2Manager from "./oauth.js";
 import logger from "./logger.js";
 import db, { ScheduleEntry } from "./database.js";
-import { normalizeString, parseTime } from "./utils.js";
+import { normalizeString, parseTime, createEventTimestamp } from "./utils.js";
 import notificationManager from "./notifications.js";
+
+// ============================================================================
+// COLUMN NAME CONFIGURATION
+// Change these values to match your Google Sheet column headers
+// ============================================================================
+const COLUMN_NAMES = {
+  // Required column for month/mese
+  MESE: "mese (month)",
+
+  // Required column for date
+  DATE: "date",
+
+  // Required column for person name
+  NONNA: "nonna",
+
+  // Time columns (at least one must exist)
+  TIME_COLUMNS: ["italy time", "france time"],
+
+  // Filter criteria - only sync entries where NONNA column contains this value
+  FILTER_VALUE: "maria",
+} as const;
 
 interface SheetRow {
   [key: string]: string;
@@ -61,26 +82,28 @@ class SyncEngine {
    */
   private hasRequiredColumns(row: SheetRow): boolean {
     const hasMese = Object.keys(row).some(
-      (key) => normalizeString(key) === "mese",
+      (key) => normalizeString(key) === normalizeString(COLUMN_NAMES.MESE),
     );
     const hasDate = Object.keys(row).some(
-      (key) => normalizeString(key) === "date",
+      (key) => normalizeString(key) === normalizeString(COLUMN_NAMES.DATE),
     );
     const hasNonna = Object.keys(row).some(
-      (key) => normalizeString(key) === "nonna",
+      (key) => normalizeString(key) === normalizeString(COLUMN_NAMES.NONNA),
     );
 
     // Check for at least one time column
     const hasTimeColumn = Object.keys(row).some((key) => {
       const normalized = normalizeString(key);
-      return normalized === "italy time" || normalized === "france time";
+      return COLUMN_NAMES.TIME_COLUMNS.some(
+        (timeCol) => normalized === normalizeString(timeCol),
+      );
     });
 
     return hasMese && hasDate && hasNonna && hasTimeColumn;
   }
 
   /**
-   * Get all valid sheets (sheets that contain required columns)
+   * Get all valid sheets (sheets that contain required columns and are not hidden)
    */
   private getValidSheets(): Array<{ name: string; sheet: any }> {
     if (!this.doc) {
@@ -88,12 +111,32 @@ class SyncEngine {
     }
 
     const validSheets: Array<{ name: string; sheet: any }> = [];
+    const sheetsToSkip = (process.env.SKIP_SHEET_NAMES || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s);
 
     for (const sheet of this.doc.sheetsByIndex) {
+      // Skip hidden sheets
+      if (sheet.hidden) {
+        logger.debug(`Skipping hidden sheet: "${sheet.title}"`);
+        continue;
+      }
+
+      // Skip sheets matching patterns in SKIP_SHEET_NAMES
+      if (
+        sheetsToSkip.some((pattern) =>
+          sheet.title.toLowerCase().includes(pattern.toLowerCase()),
+        )
+      ) {
+        logger.debug(`Skipping sheet (matches skip pattern): "${sheet.title}"`);
+        continue;
+      }
+
       validSheets.push({ name: sheet.title, sheet });
     }
 
-    logger.info(`Found ${validSheets.length} sheets in document`);
+    logger.info(`Found ${validSheets.length} active sheets in document`);
     return validSheets;
   }
 
@@ -157,44 +200,61 @@ class SyncEngine {
 
     for (const row of rows) {
       try {
-        // Find 'Nonna' column (case-insensitive)
+        // Find NONNA column (case-insensitive)
         let nonnaValue = "";
         for (const [key, value] of Object.entries(row)) {
-          if (normalizeString(key) === "nonna") {
-            nonnaValue = value || "";
+          if (normalizeString(key) === normalizeString(COLUMN_NAMES.NONNA)) {
+            nonnaValue = normalizeString(value) || "";
             break;
           }
         }
 
-        // Filter for 'maria'
-        if (!normalizeString(nonnaValue).includes("maria")) {
+        // Filter by FILTER_VALUE (e.g., "maria")
+        if (!nonnaValue.includes(normalizeString(COLUMN_NAMES.FILTER_VALUE))) {
           continue;
         }
 
         // Extract month, day, time - preserve raw data as-is
-        const mese = row["Mese"] || row["mese"] || "";
-        const day = row["Date"] || row["date"] || "";
-        const time =
-          row["Italy Time"] ||
-          row["italy time"] ||
-          row["France Time"] ||
-          row["france time"] ||
-          "";
+        let mese = "";
+        let day = "";
+        let time = "";
+
+        for (const [key, value] of Object.entries(row)) {
+          const normalizedKey = normalizeString(key);
+          if (normalizedKey === normalizeString(COLUMN_NAMES.MESE)) {
+            mese = value || "";
+          } else if (normalizedKey === normalizeString(COLUMN_NAMES.DATE)) {
+            day = value || "";
+          } else if (
+            COLUMN_NAMES.TIME_COLUMNS.some(
+              (col) => normalizedKey === normalizeString(col),
+            )
+          ) {
+            time = value || "";
+          }
+        }
 
         if (!mese || !day || !time) {
-          logger.warn("Skipping row with missing fields:", row);
+          logger.warn(
+            `Skipping row with missing fields: ${JSON.stringify({ mese, day, time })}`,
+          );
           continue;
         }
 
         // Validate time format (but don't convert mese/day - preserve as-is)
         parseTime(time);
 
+        // Calculate event timestamp
+        const eventTimestamp = createEventTimestamp(mese, day, time);
+
         const entry: ScheduleEntry = {
           sheet_name, // Store sheet name for tracking
-          mese, // Store raw Italian month name (e.g., "Marzo" or "mazo")
+          mese, // Store raw English month name (e.g., "March")
           day, // Store raw day (as string)
           time, // Store raw time
           name: nonnaValue,
+          event_timestamp: eventTimestamp,
+          first_notification_sent: 0,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -252,8 +312,33 @@ class SyncEngine {
    * Apply sync operations
    */
   private async applySyncOperations(diff: SyncDiff): Promise<void> {
-    // Insert new entries
+    // Track if any entries failed timestamp conversion
+    let hasTimestampErrors = false;
+
+    // Remove deleted entries first
+    for (const entry of diff.removed) {
+      const entryKey = this.createEntryKey(entry);
+      await db.deleteEntry(entry.sheet_name, entry.mese, entry.day, entry.time);
+      await db.logSync("DELETE", entryKey, JSON.stringify(entry));
+      await notificationManager.notifyAnnulled(entryKey, {
+        month: entry.mese,
+        day: entry.day,
+        time: entry.time,
+        name: entry.name,
+      });
+      logger.info(`Removed entry: ${entryKey}`);
+    }
+
+    // Insert new entries after removals
     for (const entry of diff.added) {
+      // Check if timestamp conversion failed
+      if (!entry.event_timestamp) {
+        hasTimestampErrors = true;
+        logger.error(
+          `Failed to convert timestamp for entry: ${entry.sheet_name}/${entry.mese}/${entry.day}/${entry.time}`,
+        );
+      }
+
       await db.insertEntry(entry);
       const entryKey = this.createEntryKey(entry);
       await db.logSync("INSERT", entryKey, JSON.stringify(entry));
@@ -266,18 +351,10 @@ class SyncEngine {
       logger.info(`Added entry: ${entryKey}`);
     }
 
-    // Remove deleted entries
-    for (const entry of diff.removed) {
-      const entryKey = this.createEntryKey(entry);
-      await db.deleteEntry(entry.sheet_name, entry.mese, entry.day, entry.time);
-      await db.logSync("DELETE", entryKey, JSON.stringify(entry));
-      await notificationManager.notifyAnnulled(entryKey, {
-        month: entry.mese,
-        day: entry.day,
-        time: entry.time,
-        name: entry.name,
-      });
-      logger.info(`Removed entry: ${entryKey}`);
+    // Send template error notification if any timestamp conversions failed
+    if (hasTimestampErrors) {
+      logger.error("Template error detected - sending notification");
+      await notificationManager.notifyTemplateError();
     }
   }
 
@@ -317,10 +394,12 @@ class SyncEngine {
       // Apply operations
       if (diff.added.length > 0 || diff.removed.length > 0) {
         await this.applySyncOperations(diff);
+        /*
         await notificationManager.notifySyncCompleted(
           diff.added.length,
           diff.removed.length,
         );
+        */
       } else {
         logger.info("No changes detected");
       }

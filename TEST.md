@@ -45,6 +45,44 @@ Then run:
 npm run test:prod
 ```
 
+## Testing Notifications
+
+### Test 9am Daily Reminder
+
+Test the morning reminder notification that runs at 9 AM:
+
+```bash
+npm run test:9am
+```
+
+This will:
+
+1. Query today's entries from the database
+2. Send a daily reminder notification for each entry found
+3. Display results in the logs
+
+### Test 3-Hour Upcoming Event Reminder
+
+Test the advance notification that triggers 3 hours before an event:
+
+```bash
+npm run test:upcoming
+```
+
+This will:
+
+1. Query entries starting within the next 3 hours
+2. Send "upcoming event" notifications
+3. Mark entries as notified in the database
+4. Display results in the logs
+
+### Important Notes for Testing
+
+- Both test commands require the database to be properly initialized
+- The database must have entries with valid `event_timestamp` values
+- Test commands exit after running (they don't keep the app running)
+- Use `npm run test:9am` after adding test entries to verify the notification works
+
 ## Expected Output
 
 ### ✅ All Tests Pass

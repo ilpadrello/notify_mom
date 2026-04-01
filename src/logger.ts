@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logsDir = path.join(__dirname, "../../logs");
+const logFilePath = path.join(logsDir, "app.log");
 
 // Ensure logs directory exists
 if (!fs.existsSync(logsDir)) {
@@ -12,6 +13,9 @@ if (!fs.existsSync(logsDir)) {
 }
 
 const logLevel = process.env.LOG_LEVEL || "info";
+
+// Create file stream for logging (synchronous to ensure logs are written)
+const logStream = fs.createWriteStream(logFilePath, { flags: "a" });
 
 const logger = pino(
   {
@@ -32,7 +36,8 @@ const logger = pino(
         level: logLevel,
         target: "pino/file",
         options: {
-          destination: path.join(logsDir, "app.log"),
+          destination: logFilePath,
+          mkdir: true,
         },
       },
     ],

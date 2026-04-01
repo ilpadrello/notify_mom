@@ -4,13 +4,32 @@
  * Helps generate and exchange authorization codes
  */
 
-import oauth2Manager from "./oauth.js";
 import logger from "./logger.js";
+import "dotenv/config";
 
 const args = process.argv.slice(2);
 
 async function main() {
   try {
+    // Dynamically import OAuth2Manager only when needed
+    // This allows checking .env before throwing errors
+    let oauth2Manager;
+    try {
+      oauth2Manager = (await import("./oauth.js")).default;
+    } catch (error: any) {
+      if (error.message?.includes("OAuth2 credentials not configured")) {
+        console.log("\n❌ OAuth2 credentials not configured in .env\n");
+        console.log("Please add the following to your .env file:\n");
+        console.log("  GOOGLE_OAUTH_CLIENT_ID=your_client_id");
+        console.log("  GOOGLE_OAUTH_CLIENT_SECRET=your_client_secret");
+        console.log(
+          "\nFor detailed setup instructions, see: OAUTH2_SETUP.md\n",
+        );
+        process.exit(1);
+      }
+      throw error;
+    }
+
     if (args.length === 0) {
       // No arguments - print auth URL
       console.log("\n📋 Starting OAuth2 authentication process...\n");

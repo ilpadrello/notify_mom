@@ -124,10 +124,11 @@ export function parseTime(time: string): { hours: number; minutes: number } {
 
 /**
  * Normalize string for case-insensitive comparison
- * @param str String to normalize
- * @returns Lowercase trimmed string
+ * @param str String to normalize (handles undefined/null)
+ * @returns Lowercase trimmed string, or empty string if input is undefined/null
  */
-export function normalizeString(str: string): string {
+export function normalizeString(str: string | undefined | null): string {
+  if (!str) return "";
   return str.toLowerCase().trim();
 }
 /**

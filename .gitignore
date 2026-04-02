@@ -19,6 +19,8 @@ coverage/
 .nyc_output/
 .npm-debug.log*
 yarn-error.log*
-package-lock.json
-pnpm-lock.yaml# OAuth2 token (IMPORTANT: Don't commit this!)
+pnpm-lock.yaml
+# OAuth2 token (IMPORTANT: Don't commit this!)
 token.json
+*.tar
+*.tar.*

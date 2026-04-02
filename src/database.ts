@@ -1,5 +1,4 @@
-import sqlite3 from "sqlite3";
-import { open, Database } from "sqlite";
+import Database from "better-sqlite3";
 import logger from "./logger.js";
 import path from "path";
 import fs from "fs";
@@ -20,7 +19,7 @@ export interface ScheduleEntry {
 }
 
 class DatabaseManager {
-  private db: Database | null = null;
+  private db: Database.Database | null = null;
   private dbPath: string;
 
   constructor(dbPath?: string) {
@@ -40,18 +39,15 @@ class DatabaseManager {
       }
 
       // Open database connection
-      this.db = await open({
-        filename: this.dbPath,
-        driver: sqlite3.Database,
-      });
+      this.db = new Database(this.dbPath);
 
       logger.info(`Connected to database: ${this.dbPath}`);
 
       // Enable foreign keys
-      await this.db.exec("PRAGMA foreign_keys = ON");
+      this.db.exec("PRAGMA foreign_keys = ON");
 
       // Create tables if they don't exist
-      await this.createTables();
+      this.createTables();
       logger.info("Database tables initialized");
     } catch (error) {
       logger.error("Failed to initialize database:", error);
@@ -62,7 +58,7 @@ class DatabaseManager {
   /**
    * Create necessary database tables
    */
-  private async createTables(): Promise<void> {
+  private createTables(): void {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
@@ -94,15 +90,15 @@ class DatabaseManager {
     `;
 
     try {
-      await this.db.exec(createScheduleTableSQL);
-      await this.db.exec(createSyncLogTableSQL);
+      this.db.exec(createScheduleTableSQL);
+      this.db.exec(createSyncLogTableSQL);
 
       // Try to add new columns if they don't exist (for existing databases)
       try {
-        await this.db.exec(
+        this.db.exec(
           `ALTER TABLE schedule_entries ADD COLUMN event_timestamp TEXT DEFAULT NULL;`,
         );
-        await this.db.exec(
+        this.db.exec(
           `ALTER TABLE schedule_entries ADD COLUMN first_notification_sent INTEGER DEFAULT 0;`,
         );
       } catch (alterError) {
@@ -128,10 +124,11 @@ class DatabaseManager {
     }
 
     try {
-      const entries = await this.db.all(
-        "SELECT sheet_name, mese, day, time, name, created_at, updated_at FROM schedule_entries ORDER BY sheet_name, mese, day, time",
+      const stmt = this.db.prepare(
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries ORDER BY sheet_name, mese, day, time",
       );
-      return entries as ScheduleEntry[];
+      const entries = stmt.all() as ScheduleEntry[];
+      return entries;
     } catch (error) {
       logger.error("Failed to get all entries:", error);
       throw error;
@@ -152,11 +149,11 @@ class DatabaseManager {
     }
 
     try {
-      const entry = await this.db.get(
-        "SELECT sheet_name, mese, day, time, name, created_at, updated_at FROM schedule_entries WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
-        [sheet_name, mese, day, time],
+      const stmt = this.db.prepare(
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
       );
-      return entry as ScheduleEntry | undefined;
+      const entry = stmt.get(sheet_name, mese, day, time) as ScheduleEntry | undefined;
+      return entry;
     } catch (error) {
       logger.error(
         `Failed to get entry ${sheet_name}/${mese}/${day}/${time}:`,
@@ -183,11 +180,11 @@ class DatabaseManager {
 
       // Use SQLite's date() function to extract date from timestamp and compare
       // This handles timezone-aware timestamps correctly
-      const entries = await this.db.all(
+      const stmt = this.db.prepare(
         "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND date(event_timestamp) = ?",
-        [todayDateString],
       );
-      return entries as ScheduleEntry[];
+      const entries = stmt.all(todayDateString) as ScheduleEntry[];
+      return entries;
     } catch (error) {
       logger.error("Failed to get entries for today:", error);
       throw error;
@@ -206,11 +203,11 @@ class DatabaseManager {
       const now = new Date();
       const futureTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
 
-      const entries = await this.db.all(
+      const stmt = this.db.prepare(
         "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND event_timestamp > ? AND event_timestamp <= ? AND first_notification_sent = 0",
-        [now.toISOString(), futureTime.toISOString()],
       );
-      return entries as ScheduleEntry[];
+      const entries = stmt.all(now.toISOString(), futureTime.toISOString()) as ScheduleEntry[];
+      return entries;
     } catch (error) {
       logger.error("Failed to get upcoming entries:", error);
       throw error;
@@ -232,10 +229,10 @@ class DatabaseManager {
 
     try {
       const now = new Date().toISOString();
-      await this.db.run(
+      const stmt = this.db.prepare(
         "UPDATE schedule_entries SET first_notification_sent = 1, updated_at = ? WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
-        [now, sheet_name, mese, day, time],
       );
+      stmt.run(now, sheet_name, mese, day, time);
       logger.debug(
         `Marked first notification sent for ${sheet_name}/${mese}/${day}/${time}`,
       );
@@ -260,11 +257,11 @@ class DatabaseManager {
     }
 
     try {
-      const entries = await this.db.all(
+      const stmt = this.db.prepare(
         "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE day = ? AND mese = ?",
-        [day, month],
       );
-      return entries as ScheduleEntry[];
+      const entries = stmt.all(day, month) as ScheduleEntry[];
+      return entries;
     } catch (error) {
       logger.error(
         `Failed to get entries for day ${day} and month ${month}:`,
@@ -284,20 +281,20 @@ class DatabaseManager {
 
     try {
       const now = new Date().toISOString();
-      await this.db.run(
+      const stmt = this.db.prepare(
         `INSERT INTO schedule_entries (sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          entry.sheet_name,
-          entry.mese,
-          entry.day,
-          entry.time,
-          entry.name,
-          entry.event_timestamp || null,
-          entry.first_notification_sent || 0,
-          now,
-          now,
-        ],
+      );
+      stmt.run(
+        entry.sheet_name,
+        entry.mese,
+        entry.day,
+        entry.time,
+        entry.name,
+        entry.event_timestamp || null,
+        entry.first_notification_sent || 0,
+        now,
+        now,
       );
       logger.debug(
         `Inserted entry: ${entry.sheet_name}/${entry.mese}/${entry.day}/${entry.time}`,
@@ -321,12 +318,12 @@ class DatabaseManager {
 
     try {
       const now = new Date().toISOString();
-      await this.db.run(
+      const stmt = this.db.prepare(
         `UPDATE schedule_entries 
          SET name = ?, updated_at = ?
          WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?`,
-        [entry.name, now, entry.sheet_name, entry.mese, entry.day, entry.time],
       );
+      stmt.run(entry.name, now, entry.sheet_name, entry.mese, entry.day, entry.time);
       logger.debug(
         `Updated entry: ${entry.sheet_name}/${entry.mese}/${entry.day}/${entry.time}`,
       );
@@ -353,10 +350,10 @@ class DatabaseManager {
     }
 
     try {
-      await this.db.run(
+      const stmt = this.db.prepare(
         "DELETE FROM schedule_entries WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
-        [sheet_name, mese, day, time],
       );
+      stmt.run(sheet_name, mese, day, time);
       logger.debug(`Deleted entry: ${sheet_name}/${mese}/${day}/${time}`);
     } catch (error) {
       logger.error(
@@ -381,11 +378,11 @@ class DatabaseManager {
 
     try {
       const now = new Date().toISOString();
-      await this.db.run(
+      const stmt = this.db.prepare(
         `INSERT INTO sync_logs (sync_timestamp, action, entry_id, details, created_at)
          VALUES (?, ?, ?, ?, ?)`,
-        [now, action, entryId || null, details || null, now],
       );
+      stmt.run(now, action, entryId || null, details || null, now);
     } catch (error) {
       logger.error("Failed to log sync:", error);
       throw error;
@@ -398,7 +395,7 @@ class DatabaseManager {
   async close(): Promise<void> {
     if (this.db) {
       try {
-        await this.db.close();
+        this.db.close();
         logger.info("Database connection closed");
       } catch (error) {
         logger.error("Failed to close database:", error);

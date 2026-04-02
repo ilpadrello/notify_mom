@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "axios": "^1.6.8",
+    "better-sqlite3": "^12.8.0",
     "dotenv": "^16.4.5",
     "google-auth-library": "^10.6.2",
     "google-spreadsheet": "^4.1.1",
@@ -36,11 +37,10 @@
     "pino": "^8.17.2",
     "pino-pretty": "^10.3.1",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
-    "telegraf": "^4.15.0",
-    "typescript": "^5.4.5"
+    "telegraf": "^4.15.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/luxon": "^3.4.2",
     "@types/node": "^20.11.19",
     "@types/node-cron": "^3.0.11",
@@ -48,7 +48,7 @@
     "@typescript-eslint/eslint-plugin": "^7.0.1",
     "@typescript-eslint/parser": "^7.0.1",
     "eslint": "^8.56.0",
-    "google-auth-library": "^10.6.2",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
   }
 }

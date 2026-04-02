@@ -262,6 +262,7 @@ class SyncEngine {
         entries.push(entry);
       } catch (error) {
         logger.warn("Failed to parse row:", error, row);
+        console.log(error);
         continue;
       }
     }

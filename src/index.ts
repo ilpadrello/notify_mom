@@ -4,6 +4,9 @@ import db from "./database.js";
 import syncEngine from "./sync.js";
 import scheduler from "./scheduler.js";
 
+console.log("Working with environment variables:");
+console.log(process.env);
+
 async function main(): Promise<void> {
   try {
     logger.info("Application starting...");

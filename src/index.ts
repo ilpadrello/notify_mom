@@ -1,5 +1,5 @@
 import "dotenv/config";
-import logger from "./logger.js";
+import logger, { setLoggerDatabase } from "./logger.js";
 import db from "./database.js";
 import syncEngine from "./sync.js";
 import scheduler from "./scheduler.js";
@@ -9,15 +9,18 @@ console.log(process.env);
 
 async function main(): Promise<void> {
   try {
+    // Initialize database first
+    await db.initialize();
+
+    // Set up database for logger
+    setLoggerDatabase((db as any).db);
+
     logger.info("Application starting...");
     logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
 
     // Check for test mode command-line arguments
     const args = process.argv.slice(2);
     const testCommand = args[0];
-
-    // Initialize database
-    await db.initialize();
 
     // Initialize Google Sheets connection (skip for test-only commands)
     if (testCommand !== "test:9am" && testCommand !== "test:upcoming") {
@@ -67,3 +70,13 @@ async function main(): Promise<void> {
 }
 
 main();
+
+// Handle uncaught exceptions - don't crash, just log
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught exception:", error);
+});
+
+// Handle unhandled promise rejections - don't crash, just log
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error("Unhandled rejection:", { reason, promise });
+});

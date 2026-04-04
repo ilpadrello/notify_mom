@@ -2,26 +2,15 @@ version: '3.8'
 
 services:
   notify-mom:
-    # Use plain Node.js image, no custom Dockerfile
-    image: node:20-slim
+    # Use prebuilt image instead of building
+    # This assumes the image has been built with: docker buildx build -t notify-mom:latest .
+    image: notify-mom:latest
     container_name: notify-mom-app
-    working_dir: /app
-    
-    # Mount local files and directories
-    volumes:
-      # Mount entire app directory (includes src, build, package.json, tsconfig.json, etc.)
-      - .:/app
-      # Persist data and logs
-      - ./data:/app/data
-      - ./logs:/app/logs
-      # Mount token.json from host
-      - ./token.json:/app/token.json:ro
-    
     environment:
-      - NODE_ENV=${NODE_ENV:-production} # Default to production if not set
-      - LOG_LEVEL=${LOG_LEVEL:-info} # Default to info if not set
+      - NODE_ENV=production
+      - LOG_LEVEL=info
       - DATABASE_PATH=/app/data/app.db
-      - SYNC_INTERVAL_MINUTES=${SYNC_INTERVAL_MINUTES:-15} # Default to 15 if not set
+      - SYNC_INTERVAL_MINUTES=15
       # Google Sheets Configuration
       - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
       - GOOGLE_SHEETS_API_KEY=${GOOGLE_SHEETS_API_KEY}
@@ -44,20 +33,15 @@ services:
       - LOG_FILE_MAX_FILES=5
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
-      - TZ=Europe/Paris # Set timezone for consistent logging timestamps
-    
-    # Choose one of the following command options:
-    
-    # Option 1: If npm install hasn't been run yet on the Raspberry Pi
-    command: /bin/sh -c "npm install --prefer-offline --no-audit && node build/index.js"
-    
-    # Option 2: If npm install has already been run (faster startup)
-    #command: node build/index.js
-    
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+      - ./token.json:/app/token.json:ro
+      - ./.env:/app/.env:ro
     restart: unless-stopped
     networks:
       - notify-mom-network
-    
+    # Optional: Add resource limits
     deploy:
       resources:
         limits:
@@ -67,5 +51,12 @@ services:
           cpus: '0.25'
           memory: 256M
 
+volumes:
+  app-data:
+    driver: local
+  app-logs:
+    driver: local
+
 networks:
   notify-mom-network:
+    driver: bridge

@@ -20,7 +20,7 @@ class Scheduler {
   /**
    * Start the scheduler with cron expression
    */
-  start(): void {
+  async start(): Promise<void> {
     try {
       // Create cron expression for every N minutes
       // Running at every minute specified by the interval
@@ -90,6 +90,10 @@ class Scheduler {
         logger.info(
           `Found ${upcomingEntries.length} events starting within 3 hours`,
         );
+        db.log(
+          "info",
+          `Found ${upcomingEntries.length} upcoming events within 3 hours`,
+        );
 
         const upcomingList = upcomingEntries.map((entry) => ({
           name: entry.name,
@@ -115,12 +119,22 @@ class Scheduler {
           logger.info(
             `Marked notification sent for ${entry.sheet_name}/${entry.mese}/${entry.day}`,
           );
+          db.log(
+            "info",
+            `Notification sent for event at ${entry.time}`,
+            entry.name,
+          );
         }
       } else {
-        logger.debug("No upcoming events within 3 hours");
+        logger.info("No upcoming events within 3 hours");
       }
     } catch (error) {
       logger.error("Error checking upcoming events:", error);
+      db.log(
+        "error",
+        "Error checking upcoming events",
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
@@ -145,8 +159,29 @@ class Scheduler {
         }));
 
         await notificationManager.notifyDailyReminders(reminderEntries);
+        logger.info("Daily reminder notification sent successfully");
       } else {
         logger.info("No entries found for today. No reminders to send.");
+      }
+
+      // Also check for day-before entries and send notification
+      logger.info("Checking for entries tomorrow (day-before reminder)");
+      const tomorrowEntries = await db.getEntriesForTomorrow();
+
+      if (tomorrowEntries.length > 0) {
+        logger.info(
+          `Found ${tomorrowEntries.length} entries for tomorrow. Sending day-before reminders...`,
+        );
+
+        const dayBeforeEntries = tomorrowEntries.map((entry) => ({
+          name: entry.name,
+          time: entry.time,
+        }));
+
+        await notificationManager.notifyDayBeforeReminders(dayBeforeEntries);
+        logger.info("Day-before reminder notification sent successfully");
+      } else {
+        logger.info("No entries found for tomorrow. No day-before reminders to send.");
       }
     } catch (error) {
       logger.error("Error in sendDailyReminders:", error);

@@ -120,7 +120,7 @@ class OAuth2Manager {
 
       // Update token file
       fs.writeFileSync(TOKEN_FILE, JSON.stringify(credentials, null, 2));
-      logger.debug("Token refreshed successfully");
+      logger.info("Token refreshed successfully");
     } catch (error) {
       logger.error("Error refreshing token:", error);
       throw error;

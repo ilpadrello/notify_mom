@@ -89,9 +89,20 @@ class DatabaseManager {
       );
     `;
 
+    const createLogsTableSQL = `
+      CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level TEXT NOT NULL,
+        message TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL
+      );
+    `;
+
     try {
       this.db.exec(createScheduleTableSQL);
       this.db.exec(createSyncLogTableSQL);
+      this.db.exec(createLogsTableSQL);
 
       // Try to add new columns if they don't exist (for existing databases)
       try {
@@ -108,7 +119,7 @@ class DatabaseManager {
         );
       }
 
-      logger.debug("Database tables created or already exist");
+      logger.info("Database tables created or already exist");
     } catch (error) {
       logger.error("Failed to create tables:", error);
       throw error;
@@ -152,7 +163,9 @@ class DatabaseManager {
       const stmt = this.db.prepare(
         "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
       );
-      const entry = stmt.get(sheet_name, mese, day, time) as ScheduleEntry | undefined;
+      const entry = stmt.get(sheet_name, mese, day, time) as
+        | ScheduleEntry
+        | undefined;
       return entry;
     } catch (error) {
       logger.error(
@@ -178,10 +191,10 @@ class DatabaseManager {
       const day = String(today.getDate()).padStart(2, "0");
       const todayDateString = `${year}-${month}-${day}`;
 
-      // Use SQLite's date() function to extract date from timestamp and compare
+      // Use SQLite's date() function with datetime() to extract date from timestamp and compare
       // This handles timezone-aware timestamps correctly
       const stmt = this.db.prepare(
-        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND date(event_timestamp) = ?",
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND date(datetime(event_timestamp)) = ?",
       );
       const entries = stmt.all(todayDateString) as ScheduleEntry[];
       return entries;
@@ -204,9 +217,12 @@ class DatabaseManager {
       const futureTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
 
       const stmt = this.db.prepare(
-        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND event_timestamp > ? AND event_timestamp <= ? AND first_notification_sent = 0",
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND datetime(event_timestamp) > datetime(?) AND datetime(event_timestamp) <= datetime(?) AND first_notification_sent = 0",
       );
-      const entries = stmt.all(now.toISOString(), futureTime.toISOString()) as ScheduleEntry[];
+      const entries = stmt.all(
+        now.toISOString(),
+        futureTime.toISOString(),
+      ) as ScheduleEntry[];
       return entries;
     } catch (error) {
       logger.error("Failed to get upcoming entries:", error);
@@ -241,6 +257,35 @@ class DatabaseManager {
         `Failed to mark first notification sent for ${sheet_name}/${mese}/${day}/${time}:`,
         error,
       );
+      throw error;
+    }
+  }
+
+  /**
+   * Get entries for tomorrow by event_timestamp
+   */
+  async getEntriesForTomorrow(): Promise<ScheduleEntry[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const year = tomorrow.getFullYear();
+      const month = String(tomorrow.getMonth() + 1).padStart(2, "0");
+      const day = String(tomorrow.getDate()).padStart(2, "0");
+      const tomorrowDateString = `${year}-${month}-${day}`;
+
+      // Use SQLite's date() function with datetime() to extract date from timestamp and compare
+      // This handles timezone-aware timestamps correctly
+      const stmt = this.db.prepare(
+        "SELECT sheet_name, mese, day, time, name, event_timestamp, first_notification_sent, created_at, updated_at FROM schedule_entries WHERE event_timestamp IS NOT NULL AND date(datetime(event_timestamp)) = ?",
+      );
+      const entries = stmt.all(tomorrowDateString) as ScheduleEntry[];
+      return entries;
+    } catch (error) {
+      logger.error("Failed to get entries for tomorrow:", error);
       throw error;
     }
   }
@@ -296,7 +341,7 @@ class DatabaseManager {
         now,
         now,
       );
-      logger.debug(
+      logger.info(
         `Inserted entry: ${entry.sheet_name}/${entry.mese}/${entry.day}/${entry.time}`,
       );
     } catch (error) {
@@ -323,8 +368,15 @@ class DatabaseManager {
          SET name = ?, updated_at = ?
          WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?`,
       );
-      stmt.run(entry.name, now, entry.sheet_name, entry.mese, entry.day, entry.time);
-      logger.debug(
+      stmt.run(
+        entry.name,
+        now,
+        entry.sheet_name,
+        entry.mese,
+        entry.day,
+        entry.time,
+      );
+      logger.info(
         `Updated entry: ${entry.sheet_name}/${entry.mese}/${entry.day}/${entry.time}`,
       );
     } catch (error) {
@@ -354,7 +406,7 @@ class DatabaseManager {
         "DELETE FROM schedule_entries WHERE sheet_name = ? AND mese = ? AND day = ? AND time = ?",
       );
       stmt.run(sheet_name, mese, day, time);
-      logger.debug(`Deleted entry: ${sheet_name}/${mese}/${day}/${time}`);
+      logger.info(`Deleted entry: ${sheet_name}/${mese}/${day}/${time}`);
     } catch (error) {
       logger.error(
         `Failed to delete entry ${sheet_name}/${mese}/${day}/${time}:`,
@@ -390,8 +442,59 @@ class DatabaseManager {
   }
 
   /**
-   * Close database connection
+   * Log message to database
    */
+  async log(level: string, message: string, details?: string): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const stmt = this.db.prepare(
+        `INSERT INTO logs (level, message, details, created_at)
+         VALUES (?, ?, ?, ?)`,
+      );
+      stmt.run(level, message, details || null, now);
+    } catch (error) {
+      // Silently fail for logging errors to avoid infinite recursion
+      console.error("Failed to log to database:", error);
+    }
+  }
+
+  /**
+   * Get logs from database
+   */
+  async getLogs(limit: number = 100): Promise<
+    Array<{
+      id: number;
+      level: string;
+      message: string;
+      details: string | null;
+      created_at: string;
+    }>
+  > {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    try {
+      const stmt = this.db.prepare(
+        "SELECT id, level, message, details, created_at FROM logs ORDER BY created_at DESC LIMIT ?",
+      );
+      const logs = stmt.all(limit) as Array<{
+        id: number;
+        level: string;
+        message: string;
+        details: string | null;
+        created_at: string;
+      }>;
+      return logs;
+    } catch (error) {
+      console.error("Failed to get logs from database:", error);
+      return [];
+    }
+  }
   async close(): Promise<void> {
     if (this.db) {
       try {

@@ -273,11 +273,42 @@ Ciao ${upperName}, ti ricordo che oggi hai un Atelier previsto alle ${time}, mi 
         parse_mode: "Markdown",
       });
 
-      logger.info("Telegram daily reminder notification sent");
+      logger.info("Telegram daily reminder notification sent successfully");
       return true;
     } catch (error) {
       logger.error(
         "Failed to send Telegram daily reminder notification:",
+        error,
+      );
+      return false;
+    }
+  }
+
+  async notifyDayBeforeReminder(name: string, time: string): Promise<boolean> {
+    if (!this.enabled || !this.bot) {
+      logger.warn("Telegram notifications disabled");
+      return false;
+    }
+
+    try {
+      const upperName =
+        name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+
+      const message = `*📅 RICORDINO PER DOMANI 📅*
+
+Ciao ${upperName}, ti ricordo che domani hai un Atelier previsto alle ${time}. Preparati per domani! 🎨`;
+
+      await this.bot.telegram.sendMessage(this.chatId, message, {
+        parse_mode: "Markdown",
+      });
+
+      logger.info(
+        "Telegram day-before reminder notification sent successfully",
+      );
+      return true;
+    } catch (error) {
+      logger.error(
+        "Failed to send Telegram day-before reminder notification:",
         error,
       );
       return false;
@@ -302,7 +333,7 @@ Ciao ${capitalizedName}, tra poco hai un Atelier! Ricorda che inizia alle ${time
         parse_mode: "Markdown",
       });
 
-      logger.info("Telegram upcoming event notification sent");
+      logger.info("Telegram upcoming event notification sent successfully");
       return true;
     } catch (error) {
       logger.error(
@@ -404,10 +435,15 @@ class NotificationManager {
       details,
     };
 
-    await Promise.all([
-      this.emailNotifier.send(payload),
-      this.telegramNotifier.send(payload),
-    ]);
+    try {
+      await Promise.all([
+        this.emailNotifier.send(payload),
+        this.telegramNotifier.send(payload),
+      ]);
+      logger.info("Error notification sent successfully");
+    } catch (err) {
+      logger.error("Failed to send error notification:", err);
+    }
   }
 
   async notifySyncCompleted(
@@ -424,17 +460,44 @@ class NotificationManager {
       },
     };
 
-    await Promise.all([
-      this.emailNotifier.send(payload),
-      this.telegramNotifier.send(payload),
-    ]);
+    try {
+      await Promise.all([
+        this.emailNotifier.send(payload),
+        this.telegramNotifier.send(payload),
+      ]);
+      logger.info("Sync completed notification sent successfully");
+    } catch (err) {
+      logger.error("Failed to send sync completed notification:", err);
+    }
   }
 
   async notifyDailyReminders(
     entries: Array<{ name: string; time: string }>,
   ): Promise<void> {
     for (const entry of entries) {
-      await this.telegramNotifier.notifyDailyReminder(entry.name, entry.time);
+      try {
+        await this.telegramNotifier.notifyDailyReminder(entry.name, entry.time);
+      } catch (error) {
+        logger.error(`Failed to send daily reminder for ${entry.name}:`, error);
+      }
+    }
+  }
+
+  async notifyDayBeforeReminders(
+    entries: Array<{ name: string; time: string }>,
+  ): Promise<void> {
+    for (const entry of entries) {
+      try {
+        await this.telegramNotifier.notifyDayBeforeReminder(
+          entry.name,
+          entry.time,
+        );
+      } catch (error) {
+        logger.error(
+          `Failed to send day-before reminder for ${entry.name}:`,
+          error,
+        );
+      }
     }
   }
 
@@ -442,12 +505,23 @@ class NotificationManager {
     entries: Array<{ name: string; time: string }>,
   ): Promise<void> {
     for (const entry of entries) {
-      await this.telegramNotifier.notifyUpcomingEvent(entry.name, entry.time);
+      try {
+        await this.telegramNotifier.notifyUpcomingEvent(entry.name, entry.time);
+      } catch (error) {
+        logger.error(
+          `Failed to send upcoming event notification for ${entry.name}:`,
+          error,
+        );
+      }
     }
   }
 
   async notifyTemplateError(): Promise<void> {
-    await this.telegramNotifier.notifyTemplateError();
+    try {
+      await this.telegramNotifier.notifyTemplateError();
+    } catch (error) {
+      logger.error("Failed to send template error notification:", error);
+    }
   }
 }
 

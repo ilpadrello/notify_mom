@@ -90,10 +90,6 @@ class Scheduler {
         logger.info(
           `Found ${upcomingEntries.length} events starting within 3 hours`,
         );
-        db.log(
-          "info",
-          `Found ${upcomingEntries.length} upcoming events within 3 hours`,
-        );
 
         const upcomingList = upcomingEntries.map((entry) => ({
           name: entry.name,
@@ -119,22 +115,12 @@ class Scheduler {
           logger.info(
             `Marked notification sent for ${entry.sheet_name}/${entry.mese}/${entry.day}`,
           );
-          db.log(
-            "info",
-            `Notification sent for event at ${entry.time}`,
-            entry.name,
-          );
         }
       } else {
         logger.info("No upcoming events within 3 hours");
       }
     } catch (error) {
       logger.error("Error checking upcoming events:", error);
-      db.log(
-        "error",
-        "Error checking upcoming events",
-        error instanceof Error ? error.message : String(error),
-      );
     }
   }
 
@@ -181,7 +167,9 @@ class Scheduler {
         await notificationManager.notifyDayBeforeReminders(dayBeforeEntries);
         logger.info("Day-before reminder notification sent successfully");
       } else {
-        logger.info("No entries found for tomorrow. No day-before reminders to send.");
+        logger.info(
+          "No entries found for tomorrow. No day-before reminders to send.",
+        );
       }
     } catch (error) {
       logger.error("Error in sendDailyReminders:", error);

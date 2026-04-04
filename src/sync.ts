@@ -384,19 +384,11 @@ class SyncEngine {
       logger.info(
         `Found ${allSheetEntries.length} entries matching criteria across ${sheetsData.length} sheets`,
       );
-      db.log(
-        "info",
-        `Found ${allSheetEntries.length} entries across ${sheetsData.length} sheets`,
-      );
 
       // Calculate differences
       const diff = await this.calculateDiff(allSheetEntries);
 
       logger.info(
-        `Sync diff - Added: ${diff.added.length}, Removed: ${diff.removed.length}`,
-      );
-      db.log(
-        "info",
         `Sync diff - Added: ${diff.added.length}, Removed: ${diff.removed.length}`,
       );
 
@@ -416,11 +408,6 @@ class SyncEngine {
       logger.info("Sync operation completed successfully");
     } catch (error) {
       logger.error("Sync operation failed:", error);
-      db.log(
-        "error",
-        "Sync operation failed",
-        error instanceof Error ? error.message : String(error),
-      );
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       await notificationManager.notifyError(

@@ -14,8 +14,8 @@ services:
       # Persist data and logs
       - ./data:/app/data
       - ./logs:/app/logs
-      # Mount token.json from host
-      - ./token.json:/app/token.json:ro
+      # Mount token.json from host (read-write so it can be updated during auth)
+      - ./token.json:/app/token.json
     
     environment:
       - NODE_ENV=${NODE_ENV:-production} # Default to production if not set
